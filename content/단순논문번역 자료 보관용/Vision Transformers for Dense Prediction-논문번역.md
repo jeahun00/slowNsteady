@@ -1,17 +1,26 @@
 # Abstract
 
-우리는 convolutional network 대신에 vision transformer를 백본으로 활용하는 dense vision transformers 구조를 소개합니다. 이 구조에서는 vision transformer의 여러 단계에서 token을 수집하여 다양한 해상도에서 이미지 같은 표현을 구성하고, 이를 convolutional decoder를 사용하여 전체 해상도의 예측으로 점진적으로 결합합니다. Transformer 백본은 일정하고 비교적 높은 해상도에서 표현을 처리하며 모든 단계에서 글로벌 수용 필드를 가집니다. 이러한 특성은 dense vision transformer가 완전한 convolutional network에 비해 더 세밀하고 글로벌하게 일관된 예측을 제공할 수 있게 합니다. 우리의 실험은 이 구조가 특히 대량의 학습 데이터가 있을 때 dense prediction task에서 상당한 개선을 보여준다는 것을 보여줍니다. 단안 깊이 추정(monocular depth estimation)의 경우, 최신의 완전한 convolutional network에 비해 최대 28%까지 상대적 성능이 향상되었습니다. 의미론적 분할(semantic segmentation)에 적용했을 때, dense vision transformer는 ADE20K에서 49.02%의 mIoU로 새로운 최고 기록을 세웠습니다. 또한, NYUv2, KITTI, Pascal Context와 같은 작은 데이터셋에 대한 미세 조정을 통해 새로운 최고 기록을 세울 수 있음을 보여줍니다. 우리의 모델은 https://github.com/intel-isl/DPT에서 이용할 수 있습니다.
+우리는 convolutional network 대신에 vision transformer를 백본으로 활용하는 dense vision transformers 구조를 소개합니다. 
+이 구조에서는 vision transformer의 여러 단계에서 token을 수집하여 다양한 해상도에서 이미지 같은 표현을 구성하고, 이를 convolutional decoder를 사용하여 전체 해상도의 예측으로 점진적으로 결합합니다. Transformer 백본은 일정하고 비교적 높은 해상도에서 표현을 처리하며 모든 단계에서 글로벌 수용 필드를 가집니다. 이러한 특성은 dense vision transformer가 완전한 convolutional network에 비해 더 세밀하고 글로벌하게 일관된 예측을 제공할 수 있게 합니다. 우리의 실험은 이 구조가 특히 대량의 학습 데이터가 있을 때 dense prediction task에서 상당한 개선을 보여준다는 것을 보여줍니다. 단안 깊이 추정(monocular depth estimation)의 경우, 최신의 완전한 convolutional network에 비해 최대 28%까지 상대적 성능이 향상되었습니다. semantic segmentation(semantic segmentation)에 적용했을 때, dense vision transformer는 ADE20K에서 49.02%의 mIoU로 새로운 최고 기록을 세웠습니다. 또한, NYUv2, KITTI, Pascal Context와 같은 작은 데이터셋에 대한 미세 조정을 통해 새로운 최고 기록을 세울 수 있음을 보여줍니다. 우리의 모델은 https://github.com/intel-isl/DPT에서 이용할 수 있습니다.
 
 # 1. Introduction
-대부분의 기존 dense prediction 구조는 convolutional network에 기반을 두고 있습니다[6, 31, 34, 42, 49, 50, 53]. Dense prediction 구조의 설계는 일반적으로 네트워크를 encoder와 decoder로 논리적으로 분리하는 패턴을 따릅니다. Encoder는 종종 ImageNet [9]과 같은 대규모 데이터셋에서 사전 훈련된 이미지 분류 네트워크, 즉 백본으로 구성됩니다. Decoder는 encoder로부터 특성을 집계하고 이를 최종 dense prediction으로 변환합니다. Dense prediction에 대한 구조적 연구는 주로 decoder와 그 집계 전략에 초점을 맞추고 있습니다[6, 7, 50, 53]. 그러나 백본 구조의 선택이 전체 모델의 능력에 큰 영향을 미친다는 것은 널리 인식되고 있으며, encoder에서 손실된 정보는 decoder에서 회복할 수 없습니다.
+대부분의 기존 dense prediction 구조는 convolutional network에 기반을 두고 있습니다[6, 31, 34, 42, 49, 50, 53]. ==Dense prediction 구조의 설계는 일반적으로 네트워크를 encoder와 decoder로 논리적으로 분리하는 패턴을 따릅니다==. 
+	Encoder는 종종 ImageNet [9]과 같은 대규모 데이터셋에서 사전 훈련된 이미지 분류 네트워크, 즉 백본으로 구성됩니다. 
+	Decoder는 encoder로부터 특성을 집계하고 이를 최종 dense prediction으로 변환합니다. 
 
-Convolutional 백본은 입력 이미지를 점진적으로 다운샘플링하여 다양한 스케일에서 특성을 추출합니다. 다운샘플링은 수용 필드의 점진적 증가를 가능하게 하고, 저수준 특성을 추상적인 고수준 특성으로 그룹화하는 동시에 네트워크의 메모리 및 계산 요구사항을 관리 가능하게 유지합니다. 그러나 다운샘플링은 특히 dense prediction 작업에서 특히 두드러지는 명백한 단점이 있습니다: 모델의 깊은 단계에서 특성의 해상도와 세밀함이 손실되어 decoder에서 회복하기 어려울 수 있습니다. 특성의 해상도와 세밀함은 이미지 분류와 같은 일부 작업에서는 중요하지 않을 수 있지만, dense prediction에서는 아키텍처가 이상적으로 입력 이미지의 해상도에 가깝거나 그 해상도에서 특성을 해결할 수 있어야 합니다.
+Dense prediction에 대한 구조적 연구는 주로 decoder와 그 집계 전략에 초점을 맞추고 있습니다[6, 7, 50, 53].
+그러나 백본 구조의 선택이 전체 모델의 능력에 큰 영향을 미친다는 것은 널리 인식되고 있으며, encoder에서 손실된 정보는 decoder에서 회복할 수 없습니다.
 
-다양한 기법이 특성의 세밀함 손실을 완화하기 위해 제안되었습니다. 이러한 기법에는 계산 예산이 허용하는 경우 더 높은 입력 해상도에서 훈련하기, 다운샘플링 없이 수용 필드를 빠르게 확장할 수 있는 dilated convolution[49], encoder의 여러 단계에서 decoder로 적절하게 배치된 skip connection[31], 또는 최근에는 네트워크 전반에 걸쳐 다중 해상도 표현을 병렬로 연결하는 기법[42] 등이 있습니다. 이러한 기법들은 예측 품질을 상당히 향상시킬 수 있지만, 네트워크는 여전히 그 기본 구성 요소인 convolution에 의해 병목 현상을 겪습니다. Convolution과 비선형 연산은 이미지 분석 네트워크의 기본 계산 단위를 형성합니다. Convolution은 정의상 제한된 수용 필드를 가진 선형 연산자입니다. 제한된 수용 필드와 개별 convolution의 제한된 표현력은 충분히 넓은 문맥과 충분히 높은 표현력을 획득하기 위해 매우 깊은 구조로 순차적으로 쌓을 필요가 있습니다. 그러나 이는 많은 양의 중간 표현을 생성해야 하며, 이는 많은 메모리를 요구합니다. 중간 표현을 다운샘플링하는 것은 기존 컴퓨터 아키텍처에서 실현 가능한 메모리 소비 수준을 유지하기 위해 필요합니다.
+==Convolutional 백본==은 입력 이미지를 점진적으로 다운샘플링하여 다양한 스케일에서 특성을 추출합니다. 
+<span style='color:var(--mk-color-green)'>다운샘플링은 수용 필드의 점진적 증가를 가능하게 하고, 저수준 특성을 추상적인 고수준 특성으로 그룹화하는 동시에 네트워크의 메모리 및 계산 요구사항을 관리 가능하게 유지</span>합니다. 
+그러나 다운샘플링은 특히 <span style='color:var(--mk-color-pink)'>dense prediction 작업에서 특히 두드러지는 명백한 단점</span>이 있습니다: 모델의 깊은 단계에서 특성의 해상도와 세밀함이 손실되어 decoder에서 회복하기 어려울 수 있습니다. 특성의 해상도와 세밀함은 이미지 분류와 같은 일부 작업에서는 중요하지 않을 수 있지만, dense prediction에서는 아키텍처가 이상적으로 입력 이미지의 해상도에 가깝거나 그 해상도에서 특성을 해결할 수 있어야 합니다.
 
-이 연구에서는 dense prediction transformer(DPT)를 소개합니다. DPT는 encoder와 decoder 설계를 기반으로 한 dense prediction 구조로, transformer를 encoder의 기본 계산 빌딩 블록으로 활용합니다. 구체적으로, 최근 제안된 vision transformer (ViT)[11]를 백본 아키텍처로 사용합니다. 우리는 ViT가 제공하는 bag-of-words 표현을 다양한 해상도에서 이미지 같은 특성 표현으로 재구성하고 이러한 특성 표현을 점진적으로 결합하여 convolutional decoder를 사용하여 최종 dense prediction을 생성합니다. 완전히 convolutional network와는 달리, vision transformer 백본은 초기 이미지 임베딩이 계산된 후 명시적인 다운샘플링 작업을 생략하고 모든 처리 단계에서 일정한 차원성을 유지합니다. 또한 모든 단계에서 글로벌 수용 필드를 가집니다. 우리는 이러한 특성이 세밀하고 전역적으로 일관된 예측을 자연스럽게 이끌어 내므로 dense prediction 작업에 특히 유리하다는 것을 보여줍니다.
+다양한 기법이 특성의 세밀함 손실을 완화하기 위해 제안되었습니다. 
+이러한 기법에는 계산 예산이 허용하는 경우 더 높은 입력 해상도에서 훈련하기, 다운샘플링 없이 수용 필드를 빠르게 확장할 수 있는 dilated convolution[49], encoder의 여러 단계에서 decoder로 적절하게 배치된 skip connection[31], 또는 최근에는 네트워크 전반에 걸쳐 다중 해상도 표현을 병렬로 연결하는 기법[42] 등이 있습니다. 이러한 기법들은 예측 품질을 상당히 향상시킬 수 있지만, 네트워크는 여전히 그 기본 구성 요소인 convolution에 의해 병목 현상을 겪습니다. Convolution과 비선형 연산은 이미지 분석 네트워크의 기본 계산 단위를 형성합니다. Convolution은 정의상 제한된 수용 필드를 가진 선형 연산자입니다. 제한된 수용 필드와 개별 convolution의 제한된 표현력은 충분히 넓은 문맥과 충분히 높은 표현력을 획득하기 위해 매우 깊은 구조로 순차적으로 쌓을 필요가 있습니다. 그러나 이는 많은 양의 중간 표현을 생성해야 하며, 이는 많은 메모리를 요구합니다. 중간 표현을 다운샘플링하는 것은 기존 컴퓨터 아키텍처에서 실현 가능한 메모리 소비 수준을 유지하기 위해 필요합니다.
 
-우리는 단안 깊이 추정(monocular depth estimation)과 의미론적 분할(semantic segmentation)에 대한 실험을 수행했습니다. 대규모 학습 데이터가 제공되는 일반적인 용도의 단안 깊이 추정 작업[30]에서, DPT는 이 작업에 대해 최고 성능을 보이는 완전한 convolutional network에 비해 28% 이상의 성능 향상을 제공합니다. 또한, 이 구조는 NYUv2[35]와 KITTI[15]와 같은 작은 단안 깊이 예측 데이터셋에 대해 미세 조정될 수 있으며, 여기에서도 새로운 최고 기록을 세웠습니다. 의미론적 분할 작업에 대한 실험을 통해 DPT의 강력한 성능을 추가로 입증했습니다. 이 작업에서 DPT는 도전적인 ADE20K[54]와 Pascal Context[26] 데이터셋에서 새로운 최고 기록을 세웠습니다. 우리의 질적 결과는 이러한 개선이 convolutional network와 비교했을 때 더 세밀하고 전역적으로 일관된 예측에 기인한 것임을 나타냅니다.
+이 연구에서는 dense prediction transformer(DPT)를 소개합니다. ==DPT는 encoder와 decoder 설계를 기반으로 한 dense prediction 구조로, transformer를 encoder의 기본 계산 빌딩 블록으로 활용==합니다. 구체적으로, 최근 제안된 vision transformer (ViT)[11]를 백본 아키텍처로 사용합니다. 우리는 ViT가 제공하는 bag-of-words 표현을 다양한 해상도에서 이미지 같은 특성 표현으로 재구성하고 이러한 특성 표현을 점진적으로 결합하여 convolutional decoder를 사용하여 최종 dense prediction을 생성합니다. 완전히 convolutional network와는 달리, vision transformer 백본은 초기 이미지 임베딩이 계산된 후 명시적인 다운샘플링 작업을 생략하고 모든 처리 단계에서 일정한 차원성을 유지합니다. 또한 모든 단계에서 글로벌 수용 필드를 가집니다. 우리는 이러한 특성이 세밀하고 전역적으로 일관된 예측을 자연스럽게 이끌어 내므로 dense prediction 작업에 특히 유리하다는 것을 보여줍니다.
+
+우리는 단안 깊이 추정(monocular depth estimation)과 semantic segmentation(semantic segmentation)에 대한 실험을 수행했습니다. 대규모 학습 데이터가 제공되는 일반적인 용도의 monocular depth estimation[30]에서, DPT는 이 작업에 대해 최고 성능을 보이는 완전한 convolutional network에 비해 28% 이상의 성능 향상을 제공합니다. 또한, 이 구조는 NYUv2[35]와 KITTI[15]와 같은 작은 단안 깊이 예측 데이터셋에 대해 미세 조정될 수 있으며, 여기에서도 새로운 최고 기록을 세웠습니다. semantic segmentation 작업에 대한 실험을 통해 DPT의 강력한 성능을 추가로 입증했습니다. 이 작업에서 DPT는 도전적인 ADE20K[54]와 Pascal Context[26] 데이터셋에서 새로운 최고 기록을 세웠습니다. 우리의 질적 결과는 이러한 개선이 convolutional network와 비교했을 때 더 세밀하고 전역적으로 일관된 예측에 기인한 것임을 나타냅니다.
 
 # 2. Related Work
 완전한 convolutional network[33, 34]는 dense prediction의 전형적인 구조입니다. 이 기본 패턴의 많은 변형이 제안되었지만, 기존의 모든 구조는 적절히 큰 문맥을 활용할 수 있는 다중 스케일 표현을 학습하기 위해 convolution과 서브샘플링을 기본 요소로 채택하고 있습니다. 일부 연구는 다양한 단계에서 풀링된 표현을 점진적으로 업샘플링하는 것을 제안합니다[1, 23, 27, 31], 반면 다른 연구들은 세밀한 예측을 회복하면서 동시에 충분히 큰 문맥을 보장하기 위해 dilated convolution[6, 7, 49]을 사용하거나 다중 스케일에서 병렬 다중 스케일 특성 집계를 사용합니다[53]. 보다 최근의 구조는 네트워크 전반에 걸쳐 고해상도 표현과 여러 낮은 해상도 표현을 유지합니다[37, 42].
@@ -23,11 +32,17 @@ Convolutional 백본은 입력 이미지를 점진적으로 다운샘플링하�
 이 섹션에서는 dense vision transformer를 소개합니다. 우리는 과거 dense prediction에 성공적이었던 전반적인 encoder-decoder 구조를 유지합니다. 우리는 vision transformer[11]를 백본으로 활용하고, 이 encoder에서 생성된 표현이 어떻게 효과적으로 dense prediction으로 변환될 수 있는지 보여주며, 이 전략의 성공에 대한 직관을 제공합니다. 전체 아키텍처의 개요는 그림 1(왼쪽)에 나타나 있습니다.
 
 ### Transformer encoder. 
-고수준에서 vision transformer(ViT)[11]는 이미지의 bag-of-words 표현[36]에 작동합니다. 각각 특성 공간에 임베딩된 이미지 패치들, 또는 대안적으로 이미지에서 추출된 깊은 특성들이 “단어”의 역할을 합니다. 우리는 이 작업의 나머지 부분에서 임베딩된 “단어”를 token으로 지칭할 것입니다. Transformer는 token 집합을 변환하기 위해 서로를 관련짓는 multi-headed self-attention(MHSA)[39]의 순차적 블록을 사용하여 표현을 변환합니다.
+고수준에서 vision transformer(ViT)[11]는 이미지의 bag-of-words 표현[36]에 작동합니다. 
+각각 특성 공간에 임베딩된 이미지 패치들, 또는 대안적으로 이미지에서 추출된 깊은 특성들이 “단어”의 역할을 합니다. 
+우리는 이 작업의 나머지 부분에서 임베딩된 “단어”를 token으로 지칭할 것입니다. 
+Transformer는 token 집합을 변환하기 위해 서로를 관련짓는 multi-headed self-attention(MHSA)[39]의 순차적 블록을 사용하여 표현을 변환합니다.
 
 우리의 애플리케이션에 중요하게, transformer는 모든 계산을 통해 token의 수를 유지합니다. Token이 이미지 패치와 일대일 대응 관계를 가지므로, ViT encoder는 모든 transformer 단계에서 초기 임베딩의 공간 해상도를 유지합니다. 추가적으로, MHSA는 근본적으로 글로벌 작업입니다. 모든 token이 다른 모든 token에 주의를 기울이고 영향을 줄 수 있기 때문입니다. 그 결과, transformer는 초기 임베딩 후 모든 단계에서 글로벌 수용 필드를 가지게 됩니다. 이는 convolutional network와 극명한 대조를 이룹니다. 후자는 특성이 연속적인 convolution 및 다운샘플링 계층을 통과함에 따라 점진적으로 수용 필드를 증가시킵니다.
 
-더 구체적으로, ViT는 이미지에서 겹치지 않는 정사각형 패치를 모두 처리하여 이미지의 패치 임베딩을 추출합니다. 패치의 크기는 $p^2$ 픽셀입니다. 이 패치들은 펴져서 벡터로 만들어지고, 선형 투영을 사용하여 각각 개별적으로 임베딩됩니다. 보다 효율적인 샘플링 변형으로, ViT는 ResNet50[16]을 적용하여 이미지의 임베딩을 추출하고, 결과적인 특성 맵의 픽셀 특성을 token으로 사용합니다. Transformer는 집합 대 집합 함수이기 때문에, 그것들은 token의 공간 위치 정보를 본질적으로 유지하지 않습니다. 따라서 이미지 임베딩은 학습 가능한 위치 임베딩과 연결되어 이 정보를 표현에 추가합니다. NLP에서의 작업을 따라, ViT는 입력 이미지에 기반을 둔 것이 아닌 특별한 token을 추가적으로 추가합니다. 이는 최종적인, 글로벌 이미지 표현으로 사용되며 분류에 사용됩니다. 이 특별한 token을 readout token으로 부릅니다. 이미지 크기가 $H \times W$ 픽셀일 때의 임베딩 절차 결과는 $\{ t_0^0, \ldots, t_{N_p}^0 \}$이며, 여기서 $N_p = \frac{HW}{p^2}$, $t_0$은 readout token을, $D$는 각 token의 특성 차원을 나타냅니다.
+더 구체적으로, ViT는 이미지에서 겹치지 않는 정사각형 패치를 모두 처리하여 이미지의 패치 임베딩을 추출합니다. 패치의 크기는 $p^2$ 픽셀입니다. 이 패치들은 펴져서 벡터로 만들어지고, 선형 투영을 사용하여 각각 개별적으로 임베딩됩니다. 보다 효율적인 샘플링 변형으로, ViT는 ResNet50[16]을 적용하여 이미지의 임베딩을 추출하고, 결과적인 feature map의 픽셀 특성을 token으로 사용합니다. 
+
+Transformer는 집합 대 집합 함수이기 때문에, 그것들은 token의 공간 위치 정보를 본질적으로 유지하지 않습니다. 
+따라서 ==이미지 임베딩은 학습 가능한 위치 임베딩과 연결되어 이 정보를 표현에 추가==합니다. NLP에서의 작업을 따라, ViT는 입력 이미지에 기반을 둔 것이 아닌 특별한 token을 추가적으로 추가합니다. 이는 최종적인, 글로벌 이미지 표현으로 사용되며 분류에 사용됩니다. 이 특별한 token을 readout token으로 부릅니다. 이미지 크기가 $H \times W$ 픽셀일 때의 임베딩 절차 결과는 $\{ t_0^0, \ldots, t_{N_p}^0 \}$이며, 여기서 $N_p = \frac{HW}{p^2}$, $t_0$은 readout token을, $D$는 각 token의 특성 차원을 나타냅니다.
 
 입력 token은 각 transformer 계층에서 새로운 표현 $t^l$로 변환됩니다. 여기서 $l$은 $l$-번째 transformer 계층의 출력을 나타냅니다. Dosovitskiy 등[11]에 의해 제안된 이 기본 설계의 여러 변형을 정의합니다. 우리의 작업에서는 세 가지 변형을 사용합니다: ViT-Base, ViT-Large, 그리고 ViT-Hybrid입니다. ViT-Base는 패치 기반 임베딩 절차를 사용하고 12개의 transformer 계층을 포함합니다; ViT-Large는 동일한 임베딩 절차를 사용하며, 24개의 transformer 계층과 더 넓은 특성 크기 $D$를 갖습니다; ViT-Hybrid는 이미지 임베딩을 계산하기 위해 ResNet50을 사용하고 이어서 12개의 transformer 계층을 따릅니다. 모든 실험에서 패치 크기 $p = 16$을 사용합니다. 이 아키텍처에 대한 추가 세부 사항은 원래 작업[11]을 참조하시기 바랍니다.
 
@@ -50,7 +65,7 @@ $$
 2. $\text{Read}_{\text{add}}(t) = \{t_1 + t_0, \dots, t_{N_p} + t_0\}$ - readout token에서 다른 모든 token에 정보를 전달하기 위해 표현을 추가합니다.
 3. $\text{Read}_{\text{proj}}(t) = \{\text{mlp}(\text{cat}(t_1, t_0)), \dots, \text{mlp}(\text{cat}(t_{N_p}, t_0))\}$ - readout token과 다른 token을 연결한 후 원래 특성 차원 $D$로 표현을 투영하고 선형 계층 다음에 GELU 비선형성을 적용하여 정보를 전달합니다.
 
-Read 블록 후에, 결과적으로 나온 $N_p$개의 token은 이미지 내 초기 패치의 위치에 따라 각 token을 배치함으로써 이미지 같은 표현으로 형성됩니다. 형식적으로, 우리는 공간적 연결 연산을 적용하여 $\frac{H}{p} \times \frac{W}{p}$ 크기의 특성 맵을 $D$ 채널로 생성합니다:
+Read 블록 후에, 결과적으로 나온 $N_p$개의 token은 이미지 내 초기 패치의 위치에 따라 각 token을 배치함으로써 이미지 같은 표현으로 형성됩니다. 형식적으로, 우리는 공간적 연결 연산을 적용하여 $\frac{H}{p} \times \frac{W}{p}$ 크기의 feature map을 $D$ 채널로 생성합니다:
 
 $$\text{Concatenate} : \mathbb{R}^{N_p \times D} \rightarrow \mathbb{R}^{\frac{H}{p} \times \frac{W}{p} \times D}$$
 
@@ -60,20 +75,20 @@ $$\text{Resample}_s : \mathbb{R}^{\frac{H}{p} \times \frac{W}{p} \times D} \righ
 
 이 연산은 먼저 $1 \times 1$ 컨볼루션을 사용하여 입력 표현을 $\hat{D}$로 투영하고, 그 다음 $s \geq p$일 때는 스트라이드가 있는 $3 \times 3$ 컨볼루션을, $s < p$일 때는 스트라이드가 있는 $3 \times 3$ transpose 컨볼루션을 사용하여 공간적 다운샘플링 및 업샘플링 작업을 각각 구현합니다.
 
-이 작업은 특정 transformer 백본 및 다양한 해상도에서 네 단계의 특성을 조합합니다. 깊은 계층에서 나온 특성은 낮은 해상도에서, 초기 계층의 특성은 높은 해상도에서 조립됩니다. ViT-Large를 사용할 때는 레이어 \( l = \{5, 12, 18, 24\} \)에서 토큰을 재조립하고, ViT-Base를 사용할 때는 \( l = \{3, 6, 9, 12\} \)를 사용합니다. ViT-Hybrid를 사용할 때는 임베딩 네트워크의 첫 번째 및 두 번째 ResNet 블록과 \( l = \{9, 12\} \) 단계에서 특성을 사용합니다. 기본 아키텍처는 readout 작업으로 투영을 사용하고, 특성 맵을 \( \hat{D} = 256 \) 차원으로 생성합니다. 이 아키텍처를 DPT-Base, DPT-Large, DPT-Hybrid로 각각 참조합니다.
+이 작업은 특정 transformer 백본 및 다양한 해상도에서 네 단계의 특성을 조합합니다. 깊은 계층에서 나온 특성은 낮은 해상도에서, 초기 계층의 특성은 높은 해상도에서 조립됩니다. ViT-Large를 사용할 때는 레이어 $l = \{5, 12, 18, 24\}$에서 토큰을 재조립하고, ViT-Base를 사용할 때는 $l = \{3, 6, 9, 12\}$를 사용합니다. ViT-Hybrid를 사용할 때는 임베딩 네트워크의 첫 번째 및 두 번째 ResNet 블록과 $l = \{9, 12\}$ 단계에서 특성을 사용합니다. 기본 아키텍처는 readout 작업으로 투영을 사용하고, feature map을 $\hat{D} = 256$ 차원으로 생성합니다. 이 아키텍처를 DPT-Base, DPT-Large, DPT-Hybrid로 각각 참조합니다.
 
-추출된 특성 맵은 RefineNet 기반 특성 융합 블록을 사용하여 연속 단계에서 결합되며, 각 융합 단계에서 표현을 두 배로 점진적으로 업샘플링합니다. 최종 표현의 크기는 입력 이미지의 해상도의 절반입니다. 최종 예측을 생성하기 위해 특정 작업에 맞는 출력 헤드를 붙입니다. 전체 아키텍처의 개략적인 개요는 그림 1에 나와 있습니다.
+추출된 feature map은 RefineNet 기반 특성 융합 블록을 사용하여 연속 단계에서 결합되며, 각 융합 단계에서 표현을 두 배로 점진적으로 업샘플링합니다. 최종 표현의 크기는 입력 이미지의 해상도의 절반입니다. 최종 예측을 생성하기 위해 특정 작업에 맞는 출력 헤드를 붙입니다. 전체 아키텍처의 개략적인 개요는 그림 1에 나와 있습니다.
 
 ### Handling varying image sizes.
-변화하는 이미지 크기를 처리하는 방법에 대해 설명하겠습니다. 완전히 convolutional network와 유사하게, DPT는 다양한 이미지 크기를 처리할 수 있습니다. 이미지 크기가 \( p \)로 나눌 수 있는 한, 임베딩 절차는 적용될 수 있으며, 다양한 수의 이미지 token \( N_p \)를 생성할 수 있습니다. transformer encoder는 집합 대 집합 구조로, 다양한 수의 token을 손쉽게 처리할 수 있습니다. 그러나, 위치 임베딩은 입력 이미지의 패치 위치를 인코딩하기 때문에 이미지 크기에 의존적입니다. 우리는 [11]에서 제안된 접근법을 따라 위치 임베딩을 적절한 크기로 선형 보간합니다. 이는 각 이미지에 대해 즉석에서 수행될 수 있습니다.
+변화하는 이미지 크기를 처리하는 방법에 대해 설명하겠습니다. 완전히 convolutional network와 유사하게, DPT는 다양한 이미지 크기를 처리할 수 있습니다. 이미지 크기가 $p$로 나눌 수 있는 한, 임베딩 절차는 적용될 수 있으며, 다양한 수의 이미지 token $N_p$를 생성할 수 있습니다. transformer encoder는 집합 대 집합 구조로, 다양한 수의 token을 손쉽게 처리할 수 있습니다. 그러나, 위치 임베딩은 입력 이미지의 패치 위치를 인코딩하기 때문에 이미지 크기에 의존적입니다. 우리는 [11]에서 제안된 접근법을 따라 위치 임베딩을 적절한 크기로 선형 보간합니다. 이는 각 이미지에 대해 즉석에서 수행될 수 있습니다.
 
 임베딩 절차와 transformer 단계가 완료된 후, 재조립 및 융합 모듈은 입력 이미지가 convolutional decoder의 스트라이드(32 픽셀)에 맞춰 정렬된다면, 다양한 수의 token을 손쉽게 처리할 수 있습니다. 이러한 방식으로 DPT는 다양한 크기의 입력 이미지에 대해 효율적으로 작동할 수 있으며, 각 이미지에 맞게 동적으로 조정할 수 있는 유연성을 제공합니다.
 
 # 4. Experiment
 
-우리는 DPT를 두 가지 dense prediction 작업인 단안 깊이 추정(monocular depth estimation)과 의미론적 분할(semantic segmentation)에 적용합니다. 이 두 작업 모두에서, 비슷한 용량을 가진 convolutional network와 비교할 때 큰 훈련 데이터셋이 사용될 경우 특히 DPT가 정확도를 상당히 향상시킬 수 있음을 보여줍니다. 우리는 먼저 기본 설정을 사용한 주요 결과를 제시하고, 이 섹션의 마지막에서 다양한 DPT 구성의 종합적인 소거 실험(ablations)을 보여줍니다.
+우리는 DPT를 두 가지 dense prediction 작업인 단안 깊이 추정(monocular depth estimation)과 semantic segmentation(semantic segmentation)에 적용합니다. 이 두 작업 모두에서, 비슷한 용량을 가진 convolutional network와 비교할 때 큰 훈련 데이터셋이 사용될 경우 특히 DPT가 정확도를 상당히 향상시킬 수 있음을 보여줍니다. 우리는 먼저 기본 설정을 사용한 주요 결과를 제시하고, 이 섹션의 마지막에서 다양한 DPT 구성의 종합적인 소거 실험(ablations)을 보여줍니다.
 
-단안 깊이 추정 작업에서는 DPT가 기존의 최고 성능을 달성한 convolutional network에 비해 깊이 예측의 정확도와 세밀도에서 현저한 개선을 보여줍니다. 의미론적 분할에서도 DPT는 특히 복잡한 장면에서의 레이블 분할의 정확도를 향상시키는 데 큰 효과를 나타냈습니다.
+monocular depth estimation에서는 DPT가 기존의 최고 성능을 달성한 convolutional network에 비해 깊이 예측의 정확도와 세밀도에서 현저한 개선을 보여줍니다. semantic segmentation에서도 DPT는 특히 복잡한 장면에서의 레이블 분할의 정확도를 향상시키는 데 큰 효과를 나타냈습니다.
 
 이 실험은 DPT의 강력한 특성 추출 능력과 전역적 문맥 이해 능력이 기존 방법들과 비교했을 때 어떻게 성능을 향상시킬 수 있는지를 입증합니다. 우리는 또한 DPT 구성의 변화가 성능에 미치는 영향을 탐구함으로써, 특정 작업과 데이터 조건에 최적화된 구성을 도출할 수 있습니다. 이러한 결과들은 DPT가 다양한 dense prediction 요구에 매우 적합할 수 있음을 시사합니다.
 
@@ -100,13 +115,13 @@ $$\text{Resample}_s : \mathbb{R}^{\frac{H}{p} \times \frac{W}{p} \times D} \righ
 
 ## 4.2. Semantic Segmentation
 
-의미론적 분할은 이산 라벨링 작업을 대표하며, dense prediction 아키텍처를 검증하는 매우 경쟁적인 분야입니다. 이전 실험과 동일한 백본과 디코더 구조를 사용합니다. 우리는 절반 해상도에서 예측하고 이중선형 보간을 사용하여 로짓을 전체 해상도로 업샘플링하는 출력 헤드를 사용합니다(부록 자료에 자세한 내용이 있음). 인코더는 다시 ImageNet에서 사전 훈련된 가중치로 초기화되고, 디코더는 무작위로 초기화됩니다.
+semantic segmentation은 이산 라벨링 작업을 대표하며, dense prediction 아키텍처를 검증하는 매우 경쟁적인 분야입니다. 이전 실험과 동일한 백본과 디코더 구조를 사용합니다. 우리는 절반 해상도에서 예측하고 이중선형 보간을 사용하여 로짓을 전체 해상도로 업샘플링하는 출력 헤드를 사용합니다(부록 자료에 자세한 내용이 있음). 인코더는 다시 ImageNet에서 사전 훈련된 가중치로 초기화되고, 디코더는 무작위로 초기화됩니다.
 
 ### Experimental protocol
 우리는 Zhang 등[51]에 의해 설정된 프로토콜을 밀접하게 따릅니다. 교차 엔트로피 손실을 사용하고 마지막 융합 계층의 출력에 보조 출력 헤드와 보조 손실을 추가합니다. 보조 손실의 가중치를 0.2로 설정합니다. 최종 분류 계층 이전에는 드롭아웃 비율을 0.1로 설정합니다. 우리는 운동량 0.9와 함께 SGD를 사용하며, 감쇠 인자가 0.9인 다항식 학습률 스케줄러를 사용합니다. 융합 계층에서는 배치 정규화를 사용하고, 배치 크기 48로 훈련합니다. 이미지는 520 픽셀의 길이로 크기가 조정됩니다. 데이터 증강을 위해 무작위 수평 뒤집기와 (0.5, 2.0) 범위의 무작위 리스케일링을 사용합니다. 우리는 480 크기의 정사각형 무작위 크롭에서 훈련합니다. 학습률은 0.002로 설정합니다. 테스트 시에는 다중 스케일 추론을 사용하고, 픽셀 정확도(pixAcc)와 평균 교차-유니온(mIoU)을 모두 보고합니다.
 
 ### ADE20K.
-ADE20K 의미론적 분할 데이터셋[54]에서 DPT를 240 에포크 동안 훈련했습니다. 표 4는 검증 세트에서의 결과를 요약합니다. DPT-Hybrid는 기존의 모든 완전한 convolutional 아키텍처를 능가합니다. DPT-Large는 성능이 약간 떨어지는데, 이는 이전 실험에 비해 상당히 작은 데이터셋 때문일 가능성이 높습니다. 그림 3은 시각적 비교를 제공합니다. DPT는 더 깨끗하고 세밀한 객체 경계를 그려내며, 경우에 따라 예측이 덜 복잡해지는 것을 관찰할 수 있습니다.
+ADE20K semantic segmentation 데이터셋[54]에서 DPT를 240 에포크 동안 훈련했습니다. 표 4는 검증 세트에서의 결과를 요약합니다. DPT-Hybrid는 기존의 모든 완전한 convolutional 아키텍처를 능가합니다. DPT-Large는 성능이 약간 떨어지는데, 이는 이전 실험에 비해 상당히 작은 데이터셋 때문일 가능성이 높습니다. 그림 3은 시각적 비교를 제공합니다. DPT는 더 깨끗하고 세밀한 객체 경계를 그려내며, 경우에 따라 예측이 덜 복잡해지는 것을 관찰할 수 있습니다.
 
 ### Fine-tuning on smaller datasets.
 DPT-Hybrid를 Pascal Context 데이터셋[26]에서 50 에포크 동안 미세 조정했습니다. 모든 다른 하이퍼파라미터는 동일하게 유지됩니다. 표 5는 이 실험의 검증 세트 결과를 보여줍니다. 다시 한번 DPT가 소규모 데이터셋에서도 강력한 성능을 제공할 수 있음을 확인할 수 있습니다.
@@ -128,7 +143,7 @@ Convolutional 아키텍처는 인코더에서 디코더로 특성을 전달하�
 
 ViT-Base는 ResNext101-WSL과 비슷한 성능을 가지며, ViT-Hybrid와 ViT-Large는 훨씬 적은 데이터로 사전 훈련되었음에도 불구하고 성능을 향상시킵니다. ResNext101-WSL은 ImageNet 사전 훈련 외에도 약 10억 규모의 약한 감독 데이터[25]로 사전 훈련되었습니다. 이 사전 훈련은 단안 깊이 예측의 성능을 향상시키는 것으로 관찰되었습니다[30]. 이 아키텍처는 원래 MiDaS 아키텍처에 해당합니다.
 
-마지막으로, DeIT[38]라는 ViT의 최근 변형과 비교합니다. DeIT는 데이터 효율적인 사전 훈련 절차를 사용하여 ViT 아키텍처를 훈련합니다. DeIT-Base 아키텍처는 ViT-Base와 동일하지만, DeIT-Base-Dist는 추가적인 distillation token을 도입합니다. 우리는 Reassemble 작업에서 이 token을 무시합니다. DeIT-Base-Dist가 ViT-Base에 비해 성능을 향상시킴을 관찰했습니다. 이는 이미지 분류를 위한 사전 훈련 절차의 개선이 의미론적 분할과 같은 dense prediction 작업에도 혜택을 줄 수 있음을 나타냅니다.
+마지막으로, DeIT[38]라는 ViT의 최근 변형과 비교합니다. DeIT는 데이터 효율적인 사전 훈련 절차를 사용하여 ViT 아키텍처를 훈련합니다. DeIT-Base 아키텍처는 ViT-Base와 동일하지만, DeIT-Base-Dist는 추가적인 distillation token을 도입합니다. 우리는 Reassemble 작업에서 이 token을 무시합니다. DeIT-Base-Dist가 ViT-Base에 비해 성능을 향상시킴을 관찰했습니다. 이는 이미지 분류를 위한 사전 훈련 절차의 개선이 semantic segmentation과 같은 dense prediction 작업에도 혜택을 줄 수 있음을 나타냅니다.
 
 ### Inference resolution.
 완전한 convolutional 아키텍처는 가장 깊은 계층에서 큰 유효 수용 필드를 가질 수 있지만, 입력에 가까운 계층은 지역적이고 작은 수용 필드를 가집니다. 따라서 훈련 해상도와 상당히 다른 입력 해상도에서 추론을 수행할 때 성능이 크게 떨어집니다. 반면에, Transformer 인코더는 모든 계층에서 글로벌 수용 필드를 가집니다. 우리는 이것이 DPT를 추론 해상도에 덜 의존적으로 만든다고 추측합니다. 이 가설을 검증하기 위해, 훈련 해상도인 384×384 픽셀보다 높은 해상도에서 추론을 수행할 때 다른 아키텍처의 성능 손실을 그래프로 나타냅니다. 우리는 훈련 해상도에서 추론을 수행했을 때의 성능에 대한 성능 감소를 백분율로 나타낸 그림 4에 그 결과를 표시합니다. 우리는 DPT 변형의 성능이 추론 해상도가 증가함에 따라 보다 우아하게 저하됨을 관찰합니다. 이는 DPT가 다양한 추론 해상도에서의 활용 가능성을 높이는 특징을 가지고 있음을 시사합니다.
