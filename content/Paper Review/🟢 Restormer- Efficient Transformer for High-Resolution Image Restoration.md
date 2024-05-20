@@ -56,5 +56,6 @@
 * 각 encoder-decoder 는 transformer block 을 포함한다.
 	* 즉, downsamling-upsampling 과정을 거친다.
 * downsampling, upsampling 은 각각 pixel-shuffle, pixel-unsuffle 을 사용한다.
+	* ref: [[Pixel shuffle, Pixel unshuffle(간략한 ESPCN review 포함)]]
 * 
 

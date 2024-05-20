@@ -74,13 +74,13 @@ $$
 $$\mathbf{I}^{SR} = f^L(\mathbf{I}^{LR}) = \mathcal{PS} \left( \mathbf{W}_L * f^{L-1}(\mathbf{I}^{LR}) + \mathbf{b}_L \right)$$
 
 - $\mathbf{I}^{SR}$ : the super-resolved image.
-- $f^L$ : low-resolution image $\mathbf{I}^{LR}$ 로 부터 
+- $f^{L-1}(\cdot)$ : previous feature map
 - $\mathcal{PS}$ : periodic shuffling operation
 $$
 \mathcal{PS}(T)_{x,y,c} = T_{\left\lfloor \frac{x}{r} \right\rfloor, \left\lfloor \frac{y}{r} \right\rfloor, c \cdot r \cdot \text{mod}(y, r) + c \cdot \text{mod}(x, r)}
 $$
 - $\mathbf{W}_L$ and $\mathbf{b}_L$ : weights and biases
-- $f^{L-1}(\mathbf{I}^{LR})$ : 이전 레이어로부터 나온 low resolution feature map
+
 
 #### 장점 
 * pixel shuffle 에는 learnable 한 network 가 존재. 따라서 데이터에 특화된 upscaling 가능
